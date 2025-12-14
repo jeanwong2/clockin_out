@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Time Clock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d6efd">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+  .container { max-width: 420px; margin: 0 auto; }
+  .clock { font-size: 40px; font-weight: 800; margin-bottom: 12px; text-align: center; }
+  .btn { display: block; width: 100%; padding: 26px; font-size: 28px; color: #fff;
+         border: none; border-radius: 12px; cursor: pointer; margin-bottom: 16px; }
+  .btn-green { background: #28a745; }
+  .btn-red   { background: #dc3545; }
+  .btn-blue  { background: #0d6efd; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #d9d9d9; padding: 8px; font-size: 14px; }
+  th { background: #f6f6f6; text-align: left; }
+  .muted { opacity: .7; font-size: 12px; margin-top: 8px; text-align: center; }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 30px;
+    transform: translateX(-50%);
+    background: #333;
+    color: #fff;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity .2s ease;
+  }
+  .toast.show { opacity: 1; }
+  .toast-close {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div id="clock" class="clock">--/--/---- --:--</div>
+
+  <button id="btnIn"  class="btn btn-green">Clock In</button>
+  <button id="btnOut" class="btn btn-red">Clock Out</button>
+  <button id="btnView" class="btn btn-blue">View Records</button>
+
+  <div id="records" style="display:none">
+    <table>
+      <thead>
+        <tr>
+          <th>DateTime (DD/MM/YYYY HH:MM)</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <p class="muted">
+    Data is stored on this device (localStorage). In Safari: Share → “Add to Home Screen” to pin it like an app.
+  </p>
+</div>
+
+<div id="toast" class="toast" style="display:none">
+  <span id="toast-text"></span>
+  <button id="toast-close" class="toast-close" aria-label="Close">&times;</button>
+</div>
+
+<script>
+  function pad(n){ return n < 10 ? '0' + n : '' + n; }
+  function nowStr() {
+    const d = new Date();
+    const dd = pad(d.getDate());
+    const mm = pad(d.getMonth() + 1);
+    const yyyy = d.getFullYear();
+    const HH = pad(d.getHours());
+    const MM = pad(d.getMinutes());
+    return `${dd}/${mm}/${yyyy} ${HH}:${MM}`;
+  }
+  function updateClock() {
+    const el = document.getElementById('clock');
+    if (el) el.textContent = nowStr();
+  }
+  setInterval(updateClock, 1000);
+  window.addEventListener('DOMContentLoaded', updateClock);
+
+  const KEY = 'timeclock.records.v1';
+
+  function loadRecords() {
+    try {
+      const s = localStorage.getItem(KEY);
+      return s ? JSON.parse(s) : [];
+    } catch (e) {
+      console.log('load error', e);
+      return [];
+    }
+  }
+  function saveRecords(arr) {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(arr));
+    } catch (e) {
+      console.log('save error', e);
+    }
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('rows');
+    tbody.innerHTML = '';
+    const recs = loadRecords();
+    if (!recs.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="2">No records yet.</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+    const sorted = recs.slice().reverse();
+    for (const r of sorted) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.dt}</td><td>${r.action}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  let audioCtx = null;
+  function beep(freq = 880, durationMs = 120) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!audioCtx) audioCtx = new AC();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.value = 0.1;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + durationMs / 1000);
+  }
+
+  let toastTimer = null;
+  function showToast(message) {
+    const toast = document.getElementById('toast');
+    const text = document.getElementById('toast-text');
+    text.textContent = message;
+    toast.style.display = 'flex';
+    void toast.offsetWidth;
+    toast.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, 5000);
+  }
+  function hideToast() {
+    const toast = document.getElementById('toast');
+    toast.classList.remove('show');
+    setTimeout(() => { toast.style.display = 'none'; }, 200);
+  }
+  document.getElementById('toast-close').addEventListener('click', hideToast);
+
+  document.getElementById('btnIn').addEventListener('click', () => {
+    const recs = loadRecords();
+    const dt = nowStr();
+    recs.push({ dt, action: 'IN' });
+    saveRecords(recs);
+    beep();
+    showToast(`Clock In at ${dt}`);
+  });
+
+  document.getElementById('btnOut').addEventListener('click', () => {
+    const recs = loadRecords();
+    const dt = nowStr();
+    recs.push({ dt, action: 'OUT' });
+    saveRecords(recs);
+    beep();
+    showToast(`Clock Out at ${dt}`);
+  });
+
+  document.getElementById('btnView').addEventListener('click', () => {
+    const panel = document.getElementById('records');
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : '';
+    if (!showing) renderTable();
+  });
+</script>
+</body>
+</html>
